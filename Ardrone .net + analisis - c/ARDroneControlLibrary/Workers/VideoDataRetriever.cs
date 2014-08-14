@@ -1,0 +1,132 @@
+﻿/* ARDrone Control .NET - An application for flying the Parrot AR drone in Windows.
+ * Copyright (C) 2010, 2011 Thomas Endres
+ * 
+ * This program is free software; you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation; either version 3 of the License, or (at your option) any later version.
+ * 
+ * This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for more details.
+ * 
+ * You should have received a copy of the GNU General Public License along with this program; if not, see <http://www.gnu.org/licenses/>.
+ */
+
+using System;
+using System.Collections.Generic;
+using System.Drawing;
+using System.IO;
+using System.Net;
+using System.Net.Sockets;
+using System.Text;
+using System.Windows.Media;
+using System.Windows.Media.Imaging;
+using System.Threading;
+
+using ARDrone.Control.Data;
+using ARDrone.Control.Events;
+using ARDrone.Control.Network;
+using ARDrone.Control.Utils;
+
+
+namespace ARDrone.Control.Workers
+{
+    public class VideoDataRetriever : UdpWorker
+    {
+        private const int keepAliveSignalInterval = 200;
+
+        private BitmapUtils bitmapUtils;
+
+        //private VideoUtils videoUtils;
+        private ARDrone.Control.Utils.Mio.VideoAnalyzerUtils videoUtils;
+
+        private Bitmap currentBitmap;
+        private ImageSource currentImage;
+
+        //mio
+        public event EventHandler NewFrame;
+
+        private SupportedFirmwareVersion firmwareVersion;
+
+        public VideoDataRetriever(NetworkConnector networkConnector, String remoteIpAddress, int port, int timeoutValue, SupportedFirmwareVersion firmwareVersion)
+            : base(networkConnector, remoteIpAddress, port, timeoutValue)
+        {
+            this.firmwareVersion = firmwareVersion;
+
+            bitmapUtils = new BitmapUtils();
+
+            ResetVariables();
+        }
+
+        protected override void ResetVariables()
+        {
+            base.ResetVariables();
+
+           // videoUtils = new VideoUtils();
+            videoUtils = new Utils.Mio.VideoAnalyzerUtils();
+            videoUtils.ImageComplete += VideoImage_ImageComplete;
+        }
+
+        protected override void BeforeConnect()
+        {
+            ResetVariables();
+        }
+
+        protected override void ProcessWorkerThread()
+        {
+            StartKeepAliveSignal();
+            SendMessage(1);
+
+            do
+            {
+                if (IsKeepAliveSignalNeeded())
+                    SendMessage(1);
+
+                byte[] buffer = client.Receive(ref endpoint);
+
+                if (buffer.Length > 0)
+                    videoUtils.ProcessByteStream(buffer);
+            }
+            while (!workerThreadEnded);
+            Console.WriteLine("ACAACA1");
+        }
+
+        protected override void AfterDisconnect()
+        {
+            ResetVariables();
+            currentBitmap = null;
+        }
+
+        private void VideoImage_ImageComplete(object sender, DroneImageCompleteEventArgs e)
+        {
+            WriteableBitmap videoImage = e.ImageSource as WriteableBitmap;
+            Bitmap bitmapImage = bitmapUtils.BitmapSourceToBitmap(videoImage);
+             
+            currentImage = videoImage;
+            currentBitmap = bitmapImage;
+            
+       /*     Bitmap bmp = new Bitmap(currentBitmap.Width/2, currentBitmap.Height/2);
+            for (int x = 0; x < bmp.Width; x++)
+            {
+                for (int y = 0; y < bmp.Height; y++)
+                {
+                    bmp.SetPixel(x, y, currentBitmap.GetPixel(x * 2, y * 2));
+                }
+                
+            }
+         */   if (NewFrame != null) NewFrame(currentBitmap,e);
+        }
+
+        public Bitmap CurrentBitmap
+        {
+            get
+            {
+                return currentBitmap;
+            }
+        }
+
+        public ImageSource CurrentImage
+        {
+            get
+            {
+                return currentImage;
+            }
+        }
+    }
+}
